@@ -1,0 +1,38 @@
+name: Scan CI
+
+on:
+    # push:
+    #   branches:
+    #     - "**"
+    pull_request:
+        branches:
+            - "**"
+
+jobs:
+    grype-scan:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install Syft & Grype
+              run: |
+                  apt-get update && apt-get install -y curl
+                  curl -sSfL https://get.anchore.io/syft | sh -s -- -b /usr/local/bin
+                  curl -sSfL https://get.anchore.io/grype | sh -s -- -b /usr/local/bin
+
+            - name: Run Syft to generate SBOM
+              run: syft . -o json > sbom.json
+
+            - name: Run Grype scan for all severities (non-failing)
+              run: grype sbom:sbom.json -o json > grype-report.json || true
+
+            - name: Run Grype scan for CRITICAL severity (failing)
+              run: grype sbom:sbom.json --fail-on critical --output table
+
+            - name: Upload Grype report as an artifact
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: grype-security-report
+                  path: grype-report.json
