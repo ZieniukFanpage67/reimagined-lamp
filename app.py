@@ -1,10 +1,18 @@
 import sqlite3
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 import uvicorn
 import datetime
 
 app = FastAPI()
+
+
+def get_db():
+    con = sqlite3.connect("orders.db", check_same_thread=False)
+    try:
+        yield con
+    finally:
+        con.close()
 
 class Order(BaseModel):
     client_id: int
@@ -40,9 +48,8 @@ def read_root():
 
 
 @app.get("/orders/{order_id}")
-def read_order_info(order_id: int) -> OrderInfo:
-    con = sqlite3.connect("./orders.db")
-    cur = con.cursor()
+def read_order_info(order_id: int, db = Depends(get_db)) -> OrderInfo:
+    cur = db.cursor()
     final_price = 0
     cur.execute("SELECT * FROM Orders WHERE order_id = ?", (order_id,))
     order_info = cur.fetchall()
@@ -60,7 +67,6 @@ def read_order_info(order_id: int) -> OrderInfo:
                     "QuantityOrdered":order_info[i][3],
                     "Price":order_info[i][4]
                 })
-        con.close()
         return {"OrderID":order_info[0][0],
                 "ClientID":order_info[0][1],
                 "Products":products,
@@ -68,27 +74,27 @@ def read_order_info(order_id: int) -> OrderInfo:
                 "OrderedAt":order_info[0][5]
                 }
     else:
-        con.close()
         raise HTTPException(status_code=404, detail="Order not found in database")
     
 @app.post("/orders")
-async def place_order(orderinfo: Order) -> PlacedOrder:
-    con = sqlite3.connect("./orders.db")
-    cur = con.cursor()
+async def place_order(orderinfo: Order, db = Depends(get_db)) -> PlacedOrder:
+    cur = db.cursor()
     final_amount = 0
     are_all_products_available = True
     cur.execute("SELECT order_id FROM Orders order by order_id DESC")
-    currentid = int(cur.fetchone()[0])
-    if currentid <= 0:
-        newid = 1
-    else:
-        newid = currentid + 1
+    #currentid = int(cur.fetchone()[0])
+    #if currentid == None:
+    #    newid = 1
+    #else:
+    #    newid = currentid + 1
+    row = cur.fetchone()
+    currentid = row[0] if row else 0
+    newid = currentid + 1
     for j in range(len(orderinfo.quantity)):
         cur.execute("SELECT quantity_available FROM Items WHERE product_id = ?", (orderinfo.product_id[j],))
         if (int(cur.fetchone()[0]) >= orderinfo.quantity[j]):
             are_all_products_available = True
         else:
-            con.close()
             are_all_products_available = False
             raise HTTPException(status_code=400, detail="Produkt nie jest aktualnie dostępny")
     if are_all_products_available == True:
@@ -99,11 +105,9 @@ async def place_order(orderinfo: Order) -> PlacedOrder:
             final_amount += total_amount_paid
             created_at = datetime.datetime.now().strftime("%c")
             cur.execute("INSERT INTO Orders VALUES (?,?,?,?,?,?)",(newid,orderinfo.client_id, orderinfo.product_id[i], orderinfo.quantity[i], total_amount_paid, created_at))
-            con.commit()
     final_amount2 = round(final_amount,2)
     cur.execute("INSERT INTO Orders VALUES (?,?,?,?,?,?)",(newid,None,None,None, final_amount2, None))
-    con.commit()
-    con.close()
+    db.commit()
     return {"OrderID": newid,
             "ClientID":orderinfo.client_id,
             "ProductID":orderinfo.product_id,
@@ -113,7 +117,7 @@ async def place_order(orderinfo: Order) -> PlacedOrder:
             }
 
 
-# test
+# test2
     
 
 if __name__ == "__main__":
