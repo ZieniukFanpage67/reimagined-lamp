@@ -25,6 +25,12 @@ class ProductInfo(BaseModel):
     QuantityOrdered: int
     Price: float
 
+class NewProduct(BaseModel):
+    ProductID: int
+    ProductName: str
+    QuantityAvailable: int
+    Price: float
+
 class OrderInfo(BaseModel):
     OrderID: int
     ClientID: int
@@ -117,6 +123,30 @@ async def place_order(orderinfo: Order, db = Depends(get_db)) -> PlacedOrder:
             }
 
 
+@app.post("/add_item")
+async def place_order(productinfo: NewProduct, db = Depends(get_db)) -> NewProduct:
+    cur = db.cursor()
+    if ((productinfo.QuantityAvailable <= 0) or (round(productinfo.Price,2) <= 0)):
+        raise HTTPException(status_code=500, detail="Quantity or price can't be lower than 0")
+    else:
+        cur.execute("SELECT product_id from Items WHERE product_id = ?", (productinfo.ProductID,))
+        if (cur.fetchall() == []):
+            cur.execute("INSERT INTO Items VALUES (?,?,?,?)", (productinfo.ProductID, productinfo.ProductName, productinfo.QuantityAvailable, productinfo.Price))
+            db.commit()
+            return productinfo
+        else:
+            raise HTTPException(status_code=500, detail="Product already exists in the database")
+
+@app.post("/delete_item/{product_id}")
+async def place_order(product_id: int, db = Depends(get_db)):
+    cur = db.cursor()
+    cur.execute("SELECT product_id from Items WHERE product_id = ?", (product_id,))
+    if (cur.fetchall() == []):
+        raise HTTPException(status_code=404, detail="Product doesn't exist in the database")
+    else:
+        cur.execute("DELETE FROM Items WHERE product_id = ?", (product_id,))
+        db.commit()
+        return {f"Successfully deleted item {product_id}"}
 # test2
     
 
