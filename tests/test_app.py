@@ -94,3 +94,35 @@ def test_read_order_not_found(client):
     response = client.get("/orders/999")
     assert response.status_code == 404
 
+def test_add_item_success(client):
+    payload = {
+    "ProductID": 123456,
+    "ProductName": "Testowy produkt",
+    "QuantityAvailable": 50,
+    "Price": 49.99
+    }
+
+    response = client.post("/add_item", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ProductID"] == 123456
+
+def test_add_item_failure(client):
+    payload = {
+    "ProductID": 123456,
+    "ProductName": "Testowy produkt",
+    "QuantityAvailable": -50, 
+    "Price": 49.99
+    }
+
+    response = client.post("/add_item", json=payload)
+    assert response.status_code == 500
+
+def test_delete_item_success(client):
+    response = client.post("/delete_item/598469")
+    assert response.status_code == 200
+
+def test_delete_item_failure(client):
+    response = client.post("/delete_item/999999999999")
+    assert response.status_code == 404
+
