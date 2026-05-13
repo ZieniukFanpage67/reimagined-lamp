@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 import uvicorn
 import datetime
+from enum import Enum
 
 app = FastAPI()
 
@@ -13,6 +14,23 @@ def get_db():
         yield con
     finally:
         con.close()
+
+class OrderStatus(Enum):
+    PENDING = "Pending"
+    PAID = "Paid"
+
+class PaymentMethod(Enum):
+    CASH = "Gotówka"
+    CARD = "Karta"
+
+class PayForOrderResponse(BaseModel):
+    OrderID: int
+    PaymentMethod: PaymentMethod
+    TotalAmountPaid: float
+
+class PayForOrderRequest(BaseModel):
+    order_id: int
+    payment_method: PaymentMethod
 
 class Order(BaseModel):
     client_id: int
@@ -37,6 +55,8 @@ class OrderInfo(BaseModel):
     Products: list[ProductInfo]
     TotalAmountPaid: float
     OrderedAt: str
+    Status: OrderStatus
+    PaymentMethod: str
 
 class PlacedOrder(BaseModel):
     OrderID: int
@@ -45,6 +65,7 @@ class PlacedOrder(BaseModel):
     QuantityOrdered: list[int]
     TotalAmountPaid: float
     OrderedAt: str
+    Status: OrderStatus
 
 
 
@@ -64,6 +85,8 @@ def read_order_info(order_id: int, db = Depends(get_db)) -> OrderInfo:
         for i in range(len(order_info)):
             if order_info[i][1]==None:
                 final_price = order_info[i][4]
+                status = order_info[i][6]
+                paymentmethod = order_info[i][7]
             else:
                 cur.execute("SELECT product_name FROM Items where product_id = ?", (order_info[i][2],))
                 productname = cur.fetchone()[0]
@@ -71,13 +94,23 @@ def read_order_info(order_id: int, db = Depends(get_db)) -> OrderInfo:
                     "ProductID":order_info[i][2],
                     "ProductName":productname,
                     "QuantityOrdered":order_info[i][3],
-                    "Price":order_info[i][4]
+                    "Price":round(order_info[i][4],2)
                 })
+        paymentmethod2 = None
+        for s in PaymentMethod:
+            if (paymentmethod == s.name):
+                paymentmethod2 = s.value
+
+        if paymentmethod2 is None:
+            paymentmethod2 = "Nieopłacone"
+
         return {"OrderID":order_info[0][0],
                 "ClientID":order_info[0][1],
                 "Products":products,
                 "TotalAmountPaid":final_price,
-                "OrderedAt":order_info[0][5]
+                "OrderedAt":order_info[0][5],
+                "Status":status,
+                "PaymentMethod": paymentmethod2
                 }
     else:
         raise HTTPException(status_code=404, detail="Order not found in database")
@@ -88,11 +121,6 @@ async def place_order(orderinfo: Order, db = Depends(get_db)) -> PlacedOrder:
     final_amount = 0
     are_all_products_available = True
     cur.execute("SELECT order_id FROM Orders order by order_id DESC")
-    #currentid = int(cur.fetchone()[0])
-    #if currentid == None:
-    #    newid = 1
-    #else:
-    #    newid = currentid + 1
     row = cur.fetchone()
     currentid = row[0] if row else 0
     newid = currentid + 1
@@ -110,21 +138,22 @@ async def place_order(orderinfo: Order, db = Depends(get_db)) -> PlacedOrder:
             total_amount_paid = cur.fetchone()[0] * orderinfo.quantity[i]
             final_amount += total_amount_paid
             created_at = datetime.datetime.now().strftime("%c")
-            cur.execute("INSERT INTO Orders VALUES (?,?,?,?,?,?)",(newid,orderinfo.client_id, orderinfo.product_id[i], orderinfo.quantity[i], total_amount_paid, created_at))
+            cur.execute("INSERT INTO Orders VALUES (?,?,?,?,?,?,?,?)",(newid,orderinfo.client_id, orderinfo.product_id[i], orderinfo.quantity[i], total_amount_paid, created_at, None, None))
     final_amount2 = round(final_amount,2)
-    cur.execute("INSERT INTO Orders VALUES (?,?,?,?,?,?)",(newid,None,None,None, final_amount2, None))
+    cur.execute("INSERT INTO Orders VALUES (?,?,?,?,?,?,?,?)",(newid,None,None,None, final_amount2, None, str(OrderStatus.PENDING.value), None))
     db.commit()
     return {"OrderID": newid,
             "ClientID":orderinfo.client_id,
             "ProductID":orderinfo.product_id,
             "QuantityOrdered":orderinfo.quantity,
             "TotalAmountPaid":final_amount2,
-            "OrderedAt": created_at
+            "OrderedAt": created_at,
+            "Status": OrderStatus.PENDING
             }
 
 
 @app.post("/add_item")
-async def place_order(productinfo: NewProduct, db = Depends(get_db)) -> NewProduct:
+async def add_item(productinfo: NewProduct, db = Depends(get_db)) -> NewProduct:
     cur = db.cursor()
     if ((productinfo.QuantityAvailable <= 0) or (round(productinfo.Price,2) <= 0)):
         raise HTTPException(status_code=500, detail="Quantity or price can't be lower than 0")
@@ -138,7 +167,7 @@ async def place_order(productinfo: NewProduct, db = Depends(get_db)) -> NewProdu
             raise HTTPException(status_code=500, detail="Product already exists in the database")
 
 @app.post("/delete_item/{product_id}")
-async def place_order(product_id: int, db = Depends(get_db)):
+async def delete_item(product_id: int, db = Depends(get_db)):
     cur = db.cursor()
     cur.execute("SELECT product_id from Items WHERE product_id = ?", (product_id,))
     if (cur.fetchall() == []):
@@ -147,7 +176,28 @@ async def place_order(product_id: int, db = Depends(get_db)):
         cur.execute("DELETE FROM Items WHERE product_id = ?", (product_id,))
         db.commit()
         return {f"Successfully deleted item {product_id}"}
-# test2
+    
+@app.post("/orders/pay")
+async def pay_for_order(req: PayForOrderRequest, db = Depends(get_db)) -> PayForOrderResponse:
+    cur = db.cursor()
+    cur.execute("SELECT * from Orders WHERE order_id = ?", (req.order_id,))
+    order_info = cur.fetchall()
+    if (order_info != []):
+        for i in range(len(order_info)):
+            if order_info[i][1]==None:
+                final_price = order_info[i][4]
+                status = order_info[i][6]
+    else:
+        raise HTTPException(status_code=404, detail="Order not found in database")
+    if (status == "Paid"):
+        raise HTTPException(status_code=500, detail="Order already paid for")
+    else:
+        cur.execute("UPDATE Orders SET status = 'Paid', payment_method = ? WHERE (order_id = ?) and (client_id IS NULL)", (str(req.payment_method.name),req.order_id,))
+        db.commit()
+        return {"OrderID": req.order_id,
+                "PaymentMethod" : req.payment_method,
+                "TotalAmountPaid": round(final_price,2)}
+    
     
 
 if __name__ == "__main__":
