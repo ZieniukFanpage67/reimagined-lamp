@@ -131,20 +131,31 @@ def test_delete_item_failure(client):
 def test_pay_for_order_success(client):
     payload = {
         "order_id":1,
-        "payment_method":'Karta'
+        "payment_method":['Karta', 'Gotówka'],
+        "amount_to_pay":[440.38, 267.43]
     }
 
     response = client.post("/orders/pay", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert data["OrderID"] == 1
-    assert data["PaymentMethod"] == "Karta"
+    assert data["Payments"] == [
+        {
+        "PaymentMethod": "Karta",
+        "AmountPaid": 440.38
+        },
+        {
+        "PaymentMethod": "Gotówka",
+        "AmountPaid": 267.43
+        }
+    ]
 
 def test_pay_for_order_failure(client):
     payload = {
-        "order_id":999,
-        "payment_method":'Karta'
+        "order_id":1,
+        "payment_method":['Karta', 'Gotówka', 'Gotówka'],
+        "amount_to_pay":[440.38, 267.43]
     }
 
     response = client.post("/orders/pay", json=payload)
-    assert response.status_code == 404
+    assert response.status_code == 500
