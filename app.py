@@ -23,14 +23,19 @@ class PaymentMethod(Enum):
     CASH = "Gotówka"
     CARD = "Karta"
 
+class Payments(BaseModel):
+    PaymentMethod: PaymentMethod
+    AmountPaid: float
+
 class PayForOrderResponse(BaseModel):
     OrderID: int
-    PaymentMethod: PaymentMethod
+    Payments: list[Payments]
     TotalAmountPaid: float
 
 class PayForOrderRequest(BaseModel):
     order_id: int
-    payment_method: PaymentMethod
+    payment_method: list[PaymentMethod]
+    amount_to_pay: list[float]
 
 class Order(BaseModel):
     client_id: int
@@ -180,23 +185,45 @@ async def delete_item(product_id: int, db = Depends(get_db)):
 @app.post("/orders/pay")
 async def pay_for_order(req: PayForOrderRequest, db = Depends(get_db)) -> PayForOrderResponse:
     cur = db.cursor()
-    cur.execute("SELECT * from Orders WHERE order_id = ?", (req.order_id,))
-    order_info = cur.fetchall()
-    if (order_info != []):
-        for i in range(len(order_info)):
-            if order_info[i][1]==None:
-                final_price = order_info[i][4]
-                status = order_info[i][6]
+    paymentsstr = ""
+    payments = []
+    price_check = 0
+    if (len(req.payment_method) > 2) or (len(req.amount_to_pay) > 2):
+        raise HTTPException(status_code=500, detail="There can't be more than 2 payment methods")
     else:
-        raise HTTPException(status_code=404, detail="Order not found in database")
-    if (status == "Paid"):
-        raise HTTPException(status_code=500, detail="Order already paid for")
-    else:
-        cur.execute("UPDATE Orders SET status = 'Paid', payment_method = ? WHERE (order_id = ?) and (client_id IS NULL)", (str(req.payment_method.name),req.order_id,))
-        db.commit()
-        return {"OrderID": req.order_id,
-                "PaymentMethod" : req.payment_method,
-                "TotalAmountPaid": round(final_price,2)}
+        cur.execute("SELECT * from Orders WHERE order_id = ?", (req.order_id,))
+        order_info = cur.fetchall()
+        if (order_info != []):
+            for i in range(len(order_info)):
+                if order_info[i][1]==None:
+                    final_price = order_info[i][4]
+                    status = order_info[i][6]
+        else:
+            raise HTTPException(status_code=404, detail="Order not found in database")
+        if (status == "Paid"):
+            raise HTTPException(status_code=500, detail="Order already paid for")
+        else:
+            for j in range(len(req.payment_method)):
+                price_check += abs(req.amount_to_pay[j])
+                payments.append({
+                    "PaymentMethod": req.payment_method[j],
+                    "AmountPaid": abs(req.amount_to_pay[j])
+                })
+            if (round(price_check,2) == round(final_price,2)):
+                if (len(req.payment_method) == 2):
+                    if (req.payment_method[0] == req.payment_method[1]):
+                        raise HTTPException(status_code=500, detail="Can't have two same payment methods")
+                    else:
+                        paymentsstr = "CARD + CASH"
+                else:
+                    paymentsstr = str(req.payment_method[0].name)
+                cur.execute("UPDATE Orders SET status = 'Paid', payment_method = ? WHERE (order_id = ?) and (client_id IS NULL)", (paymentsstr,req.order_id,))
+                db.commit()
+                return {"OrderID": req.order_id,
+                        "Payments" : payments,
+                        "TotalAmountPaid": round(final_price,2)}
+            else:
+                raise HTTPException(status_code=500, detail="You need to pay the full price")
     
     
 
