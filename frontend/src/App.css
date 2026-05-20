@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+table, th, td {
+  border: 4px solid var(--accent-border);
+  border-collapse: collapse;
+  padding: 5px;
+}
+
+

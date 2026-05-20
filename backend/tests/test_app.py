@@ -21,6 +21,15 @@ def test_db():
                             FOREIGN KEY("product_id") REFERENCES "Items"("product_id")
                         );
                       
+                      CREATE TABLE "Invoices" (
+                            "invoice_id"	INTEGER NOT NULL,
+                            "order_id"	INTEGER NOT NULL,
+                            "payment_method"	INTEGER,
+                            "total_amount_paid"	float,
+                            PRIMARY KEY("invoice_id" AUTOINCREMENT),
+                            FOREIGN KEY("order_id") REFERENCES "Orders"("order_id")
+                        );
+                      
                     INSERT INTO Items ("product_id", "product_name", "quantity_available", "price") VALUES (591268, 'Smartfon APPLE iPhone 15 5G 128GB 6.1 cali Czarny', 19, 3048);
                     INSERT INTO Items ("product_id", "product_name", "quantity_available", "price") VALUES (2013312, 'Słuchawki dokanałowe OPPO Enco AIR4 Pro ANC Biały', 31, 218.92);
                     INSERT INTO Items ("product_id", "product_name", "quantity_available", "price") VALUES (598469, 'Zegarek sportowy GARMIN Vivoactive 5 Czarny', 52, 699);
@@ -29,6 +38,7 @@ def test_db():
                     INSERT INTO Orders VALUES (1, 343434, 2013312, 2, 437.84, '2025-04-30',NULL,NULL);
                     INSERT INTO Orders VALUES (1, 343434, 497870, 3, 269.97, '2025-04-30',NULL,NULL);
                     INSERT INTO Orders VALUES (1, NULL, NULL, NULL, 707.81, NULL,'Pending',NULL);
+                    INSERT INTO Invoices VALUES (1,3,'CASH',699.00);
 
                       """)
     yield con
@@ -85,7 +95,6 @@ def test_create_order_failure(client):
 
 def test_read_order(client):
     response = client.get("/orders/1")
-    print(response.json())
     assert response.status_code == 200
     data = response.json()
     assert data["OrderID"] == 1
@@ -159,3 +168,13 @@ def test_pay_for_order_failure(client):
 
     response = client.post("/orders/pay", json=payload)
     assert response.status_code == 500
+
+def test_read_invoice_info_success(client):
+    response = client.get("/orders/invoice/1")
+    print(response.json())
+    assert response.status_code == 200
+    assert response.json()["InvoiceID"]==1
+
+def test_read_invoice_info_failure(client):
+    response = client.get("/orders/invoice/9999")
+    assert response.status_code == 404

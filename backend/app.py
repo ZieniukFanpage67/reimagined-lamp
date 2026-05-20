@@ -1,5 +1,6 @@
 import sqlite3
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 import datetime
@@ -7,6 +8,13 @@ from enum import Enum
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['http://localhost:5173'],
+    allow_credentials=True,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
 
 def get_db():
     con = sqlite3.connect("orders.db", check_same_thread=False)
@@ -18,6 +26,8 @@ def get_db():
 class OrderStatus(Enum):
     PENDING = "Pending"
     PAID = "Paid"
+    SHIPPING = "Shipping"
+
 
 class PaymentMethod(Enum):
     CASH = "Gotówka"
@@ -72,11 +82,37 @@ class PlacedOrder(BaseModel):
     OrderedAt: str
     Status: OrderStatus
 
+class Invoice(BaseModel):
+    InvoiceID: int
+    OrderID:int
+    TotalAmountPaid: float
+    PaymentMethod: str
+
+class Products(BaseModel):
+    Products: list[NewProduct]
+
 
 
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
+
+@app.get("/products")
+def read_products(db = Depends(get_db)) -> Products:
+    cur = db.cursor()
+    cur.execute("SELECT * FROM Items;")
+    fetchedproducts = cur.fetchall()
+    products = []
+    for i in range(len(fetchedproducts)):
+        products.append({
+            "ProductID":fetchedproducts[i][0],
+            "ProductName":fetchedproducts[i][1],
+            "QuantityAvailable":fetchedproducts[i][2],
+            "Price":fetchedproducts[i][3]
+        })
+
+    return {"Products": products}
+
 
 
 @app.get("/orders/{order_id}")
@@ -105,6 +141,8 @@ def read_order_info(order_id: int, db = Depends(get_db)) -> OrderInfo:
         for s in PaymentMethod:
             if (paymentmethod == s.name):
                 paymentmethod2 = s.value
+            elif (paymentmethod == "CARD + CASH"):
+                paymentmethod2 = "Karta + Gotówka"
 
         if paymentmethod2 is None:
             paymentmethod2 = "Nieopłacone"
@@ -217,7 +255,8 @@ async def pay_for_order(req: PayForOrderRequest, db = Depends(get_db)) -> PayFor
                         paymentsstr = "CARD + CASH"
                 else:
                     paymentsstr = str(req.payment_method[0].name)
-                cur.execute("UPDATE Orders SET status = 'Paid', payment_method = ? WHERE (order_id = ?) and (client_id IS NULL)", (paymentsstr,req.order_id,))
+                cur.execute("UPDATE Orders SET status = 'Shipping', payment_method = ? WHERE (order_id = ?) and (client_id IS NULL)", (paymentsstr,req.order_id,))
+                cur.execute("INSERT INTO Invoices ('order_id', 'payment_method', 'total_amount_paid') VALUES (?,?,?)",(req.order_id, paymentsstr, round(final_price,2),))
                 db.commit()
                 return {"OrderID": req.order_id,
                         "Payments" : payments,
@@ -225,6 +264,30 @@ async def pay_for_order(req: PayForOrderRequest, db = Depends(get_db)) -> PayFor
             else:
                 raise HTTPException(status_code=500, detail="You need to pay the full price")
     
+@app.get("/orders/invoice/{invoice_id}")
+def read_invoice_info(invoice_id: int, db = Depends(get_db)) -> Invoice:
+    cur = db.cursor()
+    cur.execute("SELECT * FROM Invoices WHERE invoice_id = ?", (invoice_id,))
+    response = cur.fetchone()
+    if (response != None):
+        paymentmethod2 = None
+        for s in PaymentMethod:
+            if (response[2] == s.name):
+                paymentmethod2 = s.value
+            elif (response[2] == "CARD + CASH"):
+                paymentmethod2 = "Karta + Gotówka"
+
+        if paymentmethod2 is None:
+            paymentmethod2 = "Nieopłacone"
+        
+        return {
+            "InvoiceID":response[0],
+            "OrderID":response[1],
+            "TotalAmountPaid":response[3],
+            "PaymentMethod":paymentmethod2
+        }
+    else:
+        raise HTTPException(status_code=404, detail="Invoice not found in database")
     
 
 if __name__ == "__main__":
