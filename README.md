@@ -4,5 +4,4 @@
 
 Prosty projekt realizowany przez **Team Praktykantów**.
 
-Aby uruchomić backend: python /backend/app.py
-Aby uruchomić frontend: npm run dev --prefix ./frontend
+Aby uruchomić aplikacje: nf start

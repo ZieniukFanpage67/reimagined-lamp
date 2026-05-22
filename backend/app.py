@@ -10,14 +10,14 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['http://localhost:5173'],
+    allow_origins=['http://localhost:5173', 'http://localhost:4173'],
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
 )
 
 def get_db():
-    con = sqlite3.connect("orders.db", check_same_thread=False)
+    con = sqlite3.connect("./backend/orders.db", check_same_thread=False)
     try:
         yield con
     finally:
